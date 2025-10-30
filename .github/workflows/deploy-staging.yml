@@ -1,0 +1,59 @@
+name: Deploy to Staging
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+  workflow_dispatch: # Allows manual triggering
+
+jobs:
+  deploy:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history for better git operations
+
+      - name: Deploy to Staging via SFTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.SIERRA_SFTP_HOST }}
+          username: ${{ secrets.SIERRA_SFTP_USERNAME }}
+          password: ${{ secrets.SIERRA_SFTP_PASSWORD }}
+          port: ${{ secrets.SIERRA_SFTP_PORT }}
+          protocol: ftps
+          # Plugin deployment path for sierra-sms-commands
+          server-dir: ${{ secrets.SIERRA_SFTP_REMOTE_PATH_SMS_PLUGIN }}
+
+          # Exclude development files
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/.DS_Store
+            **/.env*
+            **/tests/**
+            **/__tests__/**
+            **/*.test.php
+            **/*.spec.php
+            .github/**
+            .vscode/**
+
+          log-level: verbose
+
+      - name: Deployment Summary
+        if: success()
+        run: |
+          echo "✅ Successfully deployed sierra-sms-commands plugin to staging!"
+          echo "📦 Branch: ${{ github.ref_name }}"
+          echo "🔨 Commit: ${{ github.sha }}"
+          echo "👤 Author: ${{ github.actor }}"
+
+      - name: Notify on Failure
+        if: failure()
+        run: |
+          echo "❌ Deployment failed!"
+          echo "Please check the logs above for details."
