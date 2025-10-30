@@ -7,6 +7,10 @@ on:
       - staging
   workflow_dispatch: # Allows manual triggering
 
+env:
+  # Base path for all plugins - automatically appends repo name
+  PLUGINS_BASE_PATH: '/public/wp-content/plugins'
+
 jobs:
   deploy:
     name: Deploy to Staging
@@ -18,6 +22,16 @@ jobs:
         with:
           fetch-depth: 0 # Full history for better git operations
 
+      - name: Set plugin path
+        id: plugin-path
+        run: |
+          # Automatically construct the plugin path from repo name
+          PLUGIN_NAME="${{ github.event.repository.name }}"
+          REMOTE_PATH="${{ env.PLUGINS_BASE_PATH }}/${PLUGIN_NAME}/"
+          echo "remote_path=${REMOTE_PATH}" >> $GITHUB_OUTPUT
+          echo "plugin_name=${PLUGIN_NAME}" >> $GITHUB_OUTPUT
+          echo "📁 Deploying to: ${REMOTE_PATH}"
+
       - name: Deploy to Staging via SFTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
@@ -26,8 +40,8 @@ jobs:
           password: ${{ secrets.SIERRA_SFTP_PASSWORD }}
           port: ${{ secrets.SIERRA_SFTP_PORT }}
           protocol: ftps
-          # Plugin deployment path for sierra-sms-commands
-          server-dir: ${{ secrets.SIERRA_SFTP_REMOTE_PATH_SMS_PLUGIN }}
+          # Auto-constructed plugin path based on repository name
+          server-dir: ${{ steps.plugin-path.outputs.remote_path }}
 
           # Exclude development files
           exclude: |
@@ -47,7 +61,8 @@ jobs:
       - name: Deployment Summary
         if: success()
         run: |
-          echo "✅ Successfully deployed sierra-sms-commands plugin to staging!"
+          echo "✅ Successfully deployed ${{ steps.plugin-path.outputs.plugin_name }} plugin to staging!"
+          echo "📁 Remote path: ${{ steps.plugin-path.outputs.remote_path }}"
           echo "📦 Branch: ${{ github.ref_name }}"
           echo "🔨 Commit: ${{ github.sha }}"
           echo "👤 Author: ${{ github.actor }}"
@@ -55,5 +70,5 @@ jobs:
       - name: Notify on Failure
         if: failure()
         run: |
-          echo "❌ Deployment failed!"
+          echo "❌ Deployment failed for ${{ steps.plugin-path.outputs.plugin_name }}!"
           echo "Please check the logs above for details."
