@@ -40,6 +40,25 @@ class Webhook_Handler extends WP_REST_Controller {
 	}
 
 	/**
+	 * Send TwiML response
+	 *
+	 * Twilio expects TwiML (XML) responses, not JSON
+	 *
+	 * @param string $message Optional message to include in TwiML
+	 */
+	private function send_twiml_response( $message = '' ) {
+		status_header( 200 );
+		header( 'Content-Type: text/xml; charset=utf-8' );
+		echo '<?xml version="1.0" encoding="UTF-8"?>';
+		echo '<Response>';
+		if ( ! empty( $message ) ) {
+			echo '<Message><Body>' . esc_xml( $message ) . '</Body></Message>';
+		}
+		echo '</Response>';
+		exit;
+	}
+
+	/**
 	 * Handle incoming SMS webhook
 	 */
 	public function handle_webhook( $request ) {
@@ -47,12 +66,21 @@ class Webhook_Handler extends WP_REST_Controller {
 		$provider = Provider_Manager::get_active_provider();
 
 		if ( ! $provider ) {
+			// Twilio needs TwiML response
+			if ( $this->is_twilio_request( $request ) ) {
+				$this->send_twiml_response();
+			}
 			return new WP_Error( 'no_provider', __( 'No SMS provider configured', 'sierra-sms-commands' ), [ 'status' => 500 ] );
 		}
 
-		// Validate webhook
-		if ( ! $provider->validate_webhook( $request ) ) {
+		// Validate webhook (allow bypass for local development)
+		$bypass_validation = apply_filters( 'sierra_sms_bypass_signature_validation', false );
+		if ( ! $bypass_validation && ! $provider->validate_webhook( $request ) ) {
 			do_action( 'sierra_sms_webhook_invalid', $request, $provider->get_slug() );
+			// Twilio needs TwiML response
+			if ( $provider->get_slug() === 'twilio' ) {
+				$this->send_twiml_response();
+			}
 			return new WP_Error( 'invalid_webhook', __( 'Invalid webhook signature', 'sierra-sms-commands' ), [ 'status' => 403 ] );
 		}
 
@@ -73,12 +101,20 @@ class Webhook_Handler extends WP_REST_Controller {
 		if ( ! $user ) {
 			// Unknown number - send help message
 			$this->send_reply( $message_data['from'], __( 'Unrecognized phone number. Please contact an administrator to register your number.', 'sierra-sms-commands' ), $provider );
+			// Twilio needs TwiML response
+			if ( $provider->get_slug() === 'twilio' ) {
+				$this->send_twiml_response();
+			}
 			return new WP_REST_Response( [ 'status' => 'unknown_user' ], 200 );
 		}
 
 		// Check capabilities
 		if ( ! user_can( $user->ID, 'edit_sierra_lifts' ) ) {
 			$this->send_reply( $message_data['from'], __( 'You do not have permission to update resort data.', 'sierra-sms-commands' ), $provider );
+			// Twilio needs TwiML response
+			if ( $provider->get_slug() === 'twilio' ) {
+				$this->send_twiml_response();
+			}
 			return new WP_REST_Response( [ 'status' => 'unauthorized' ], 200 );
 		}
 
@@ -91,7 +127,23 @@ class Webhook_Handler extends WP_REST_Controller {
 		// Log the command
 		do_action( 'sierra_sms_command_processed', $message_data, $user->ID, $reply, $provider->get_slug() );
 
+		// Twilio needs TwiML response
+		if ( $provider->get_slug() === 'twilio' ) {
+			$this->send_twiml_response();
+		}
+
 		return new WP_REST_Response( [ 'status' => 'success' ], 200 );
+	}
+
+	/**
+	 * Check if request is from Twilio
+	 *
+	 * @param WP_REST_Request $request Request object
+	 * @return bool True if Twilio request
+	 */
+	private function is_twilio_request( $request ) {
+		$params = $request->get_body_params();
+		return isset( $params['MessageSid'] ) || isset( $params['SmsSid'] );
 	}
 
 	/**
@@ -104,6 +156,11 @@ class Webhook_Handler extends WP_REST_Controller {
 	 * @return string Reply message
 	 */
 	private function process_command( $message, $phone_number, $user_id, $provider ) {
+		// Check if this is a numeric response to disambiguation
+		if ( preg_match( '/^\s*(\d+)\s*$/', $message, $matches ) ) {
+			return $this->handle_disambiguation_selection( $phone_number, $user_id, (int) $matches[1], $provider );
+		}
+
 		// Parse command
 		$command = Command_Parser::parse( $message );
 
@@ -141,14 +198,30 @@ class Webhook_Handler extends WP_REST_Controller {
 		if ( isset( $command['error'] ) ) {
 			// Check for ambiguous matches
 			if ( isset( $command['matches'] ) && ! empty( $command['matches'] ) ) {
-				$names = array_map( function( $match ) {
-					return $match->post_title;
-				}, $command['matches'] );
-
-				return sprintf(
-					__( "Multiple matches found:\n• %s\n\nPlease be more specific.", 'sierra-sms-commands' ),
-					implode( "\n• ", $names )
+				// Store disambiguation choices
+				Confirmation_Manager::store_disambiguation_choices(
+					$phone_number,
+					$command['action'],
+					$command['matches'],
+					$user_id
 				);
+
+				// Build numbered list
+				$action_verb = $command['action'] === 'close' ? __( 'close', 'sierra-sms-commands' ) : __( 'open', 'sierra-sms-commands' );
+				$options = [];
+				foreach ( $command['matches'] as $index => $match ) {
+					$number = $index + 1;
+					$type_label = Command_Parser::get_type_label( $match->post_type );
+					$options[] = sprintf(
+						__( 'Press %d to %s %s %s', 'sierra-sms-commands' ),
+						$number,
+						$action_verb,
+						$type_label,
+						$match->post_title
+					);
+				}
+
+				return implode( "\n", $options );
 			}
 
 			return $command['error'];
@@ -224,6 +297,51 @@ class Webhook_Handler extends WP_REST_Controller {
 
 		// Execute the command
 		return $this->execute_and_reply( $pending['command'], $user_id, $phone_number, $provider );
+	}
+
+	/**
+	 * Handle disambiguation selection
+	 *
+	 * @param string $phone_number Phone number
+	 * @param int    $user_id User ID
+	 * @param int    $selection Selected number (1-based)
+	 * @param object $provider Provider
+	 * @return string Reply message
+	 */
+	private function handle_disambiguation_selection( $phone_number, $user_id, $selection, $provider ) {
+		$disambiguation = Confirmation_Manager::get_disambiguation_choices( $phone_number );
+
+		if ( ! $disambiguation ) {
+			return __( 'No pending selection. Please send a new command.', 'sierra-sms-commands' );
+		}
+
+		// Validate selection number
+		$matches = $disambiguation['matches'];
+		$index = $selection - 1; // Convert to 0-based
+
+		if ( $index < 0 || $index >= count( $matches ) ) {
+			return sprintf(
+				__( 'Invalid selection. Please choose 1-%d.', 'sierra-sms-commands' ),
+				count( $matches )
+			);
+		}
+
+		// Get the selected match
+		$selected_match = $matches[ $index ];
+
+		// Build command from selection
+		$command = [
+			'action'  => $disambiguation['action'],
+			'type'    => $selected_match->post_type,
+			'name'    => $selected_match->post_title,
+			'post_id' => $selected_match->ID,
+		];
+
+		// Clear disambiguation choices
+		Confirmation_Manager::clear_disambiguation_choices( $phone_number );
+
+		// Execute the command
+		return $this->execute_and_reply( $command, $user_id, $phone_number, $provider );
 	}
 
 	/**

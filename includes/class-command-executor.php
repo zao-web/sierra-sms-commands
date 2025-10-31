@@ -43,34 +43,41 @@ class Command_Executor {
 		// Set current user for audit trail
 		wp_set_current_user( $user_id );
 
-		// Update via REST API internally to ensure all hooks fire
-		$request = new \WP_REST_Request( 'PUT', '/sierra/v1/' . self::get_rest_endpoint( $command['type'] ) . '/' . $command['post_id'] );
-		$request->set_param( 'status', $new_status );
+		// Update post meta directly
+		$updated = update_post_meta( $command['post_id'], 'status', $new_status );
 
-		$response = rest_do_request( $request );
+		if ( $updated === false && $old_status === $new_status ) {
+			// Already in requested state
+			$action_label = ( $command['action'] === 'close' ) ? __( 'closed', 'sierra-sms-commands' ) : __( 'opened', 'sierra-sms-commands' );
+			return [
+				'success' => true,
+				'message' => sprintf(
+					__( '%s %s is already %s', 'sierra-sms-commands' ),
+					Command_Parser::get_type_label( $command['type'] ),
+					$command['name'],
+					$action_label
+				),
+			];
+		}
 
-		if ( is_wp_error( $response ) || $response->is_error() ) {
+		if ( $updated === false ) {
 			return [
 				'success' => false,
 				'message' => __( 'Failed to update status', 'sierra-sms-commands' ),
 			];
 		}
 
-		// Override audit log source to include SMS provider
-		global $wpdb;
-		$audit_table = $wpdb->prefix . 'sierra_audit_logs';
-
-		// Update the most recent audit log entry for this post to include SMS source
-		$wpdb->query( $wpdb->prepare(
-			"UPDATE $audit_table
-			SET change_source = %s
-			WHERE post_id = %d
-			AND field_changed = 'status'
-			ORDER BY created_at DESC
-			LIMIT 1",
-			'sms:' . $provider,
-			$command['post_id']
-		) );
+		// Create audit log entry with SMS source
+		if ( class_exists( '\SierraResortData\Audit_Logger' ) ) {
+			\SierraResortData\Audit_Logger::log_change(
+				$command['post_id'],
+				'status',
+				$old_status,
+				$new_status,
+				$user_id,
+				'sms:' . $provider
+			);
+		}
 
 		$action_label = ( $command['action'] === 'close' ) ? __( 'closed', 'sierra-sms-commands' ) : __( 'opened', 'sierra-sms-commands' );
 

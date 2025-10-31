@@ -109,9 +109,9 @@ class Command_Parser {
 
 		return [
 			'action'  => $action,
-			'type'    => $match['post_type'],
-			'name'    => $match['post_title'],
-			'post_id' => $match['ID'],
+			'type'    => $match->post_type,
+			'name'    => $match->post_title,
+			'post_id' => $match->ID,
 		];
 	}
 
@@ -126,6 +126,9 @@ class Command_Parser {
 		global $wpdb;
 
 		$search_term = strtolower( $search_term );
+
+		// Normalize spelled-out numbers to digits
+		$search_term = self::normalize_numbers( $search_term );
 
 		// Exact match first
 		$posts = get_posts( [
@@ -241,7 +244,7 @@ class Command_Parser {
 	 * @param string $post_type Post type slug
 	 * @return string Label
 	 */
-	private static function get_type_label( $post_type ) {
+	public static function get_type_label( $post_type ) {
 		$labels = [
 			'sierra_lift'         => __( 'Lift', 'sierra-sms-commands' ),
 			'sierra_trail'        => __( 'Trail', 'sierra-sms-commands' ),
@@ -250,6 +253,45 @@ class Command_Parser {
 		];
 
 		return $labels[ $post_type ] ?? $post_type;
+	}
+
+	/**
+	 * Normalize spelled-out numbers to digits
+	 *
+	 * @param string $text Text to normalize
+	 * @return string Normalized text
+	 */
+	private static function normalize_numbers( $text ) {
+		$number_map = [
+			'zero'      => '0',
+			'one'       => '1',
+			'two'       => '2',
+			'three'     => '3',
+			'four'      => '4',
+			'five'      => '5',
+			'six'       => '6',
+			'seven'     => '7',
+			'eight'     => '8',
+			'nine'      => '9',
+			'ten'       => '10',
+			'eleven'    => '11',
+			'twelve'    => '12',
+			'thirteen'  => '13',
+			'fourteen'  => '14',
+			'fifteen'   => '15',
+			'sixteen'   => '16',
+			'seventeen' => '17',
+			'eighteen'  => '18',
+			'nineteen'  => '19',
+			'twenty'    => '20',
+		];
+
+		// Replace spelled-out numbers with digits
+		foreach ( $number_map as $word => $digit ) {
+			$text = preg_replace( '/\b' . $word . '\b/i', $digit, $text );
+		}
+
+		return $text;
 	}
 
 	/**

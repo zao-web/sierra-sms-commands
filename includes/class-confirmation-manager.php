@@ -177,10 +177,53 @@ class Confirmation_Manager {
 	}
 
 	/**
+	 * Store disambiguation choices
+	 *
+	 * @param string $phone_number User's phone number
+	 * @param string $action Action (open/close/reopen)
+	 * @param array  $matches Array of WP_Post objects
+	 * @param int    $user_id User ID
+	 * @return bool Success
+	 */
+	public static function store_disambiguation_choices( $phone_number, $action, $matches, $user_id ) {
+		$key = self::get_transient_key( $phone_number, 'disambiguate' );
+		$data = [
+			'action'     => $action,
+			'matches'    => $matches,
+			'user_id'    => $user_id,
+			'stored_at'  => time(),
+		];
+
+		return set_transient( $key, $data, 300 ); // 5 minutes
+	}
+
+	/**
+	 * Get disambiguation choices
+	 *
+	 * @param string $phone_number User's phone number
+	 * @return array|false Disambiguation data or false
+	 */
+	public static function get_disambiguation_choices( $phone_number ) {
+		$key = self::get_transient_key( $phone_number, 'disambiguate' );
+		return get_transient( $key );
+	}
+
+	/**
+	 * Clear disambiguation choices
+	 *
+	 * @param string $phone_number User's phone number
+	 * @return bool Success
+	 */
+	public static function clear_disambiguation_choices( $phone_number ) {
+		$key = self::get_transient_key( $phone_number, 'disambiguate' );
+		return delete_transient( $key );
+	}
+
+	/**
 	 * Get transient key
 	 *
 	 * @param string $phone_number Phone number
-	 * @param string $type Type (pending or undo)
+	 * @param string $type Type (pending, undo, or disambiguate)
 	 * @return string Transient key
 	 */
 	private static function get_transient_key( $phone_number, $type ) {
