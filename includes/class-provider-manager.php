@@ -10,6 +10,7 @@
 namespace SierraSMSCommands;
 
 use SierraSMSCommands\Providers\SMS_Provider;
+use SierraSMSCommands\Providers\Mobiniti_Provider;
 use SierraSMSCommands\Providers\Telnyx_Provider;
 use SierraSMSCommands\Providers\Textbelt_Provider;
 use SierraSMSCommands\Providers\Twilio_Provider;
@@ -36,6 +37,7 @@ class Provider_Manager {
 	 * Register default providers
 	 */
 	public static function register_default_providers() {
+		self::register_provider( new Mobiniti_Provider() );
 		self::register_provider( new Telnyx_Provider() );
 		self::register_provider( new Textbelt_Provider() );
 		self::register_provider( new Twilio_Provider() );

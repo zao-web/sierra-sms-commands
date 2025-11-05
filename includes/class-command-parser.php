@@ -52,18 +52,23 @@ class Command_Parser {
 		}
 
 		// Parse action + type + name
-		// Examples: "open lift grandview", "close broadway", "open gate 5"
-		$pattern = '/^(open|close|reopen)\s+(?:(lift|trail|gate|park|feature)\s+)?(.+)$/i';
+		// Examples: "open lift grandview", "close broadway", "open gate 5", "groom broadway"
+		$pattern = '/^(open|close|reopen|groom|groomed)\s+(?:(lift|trail|gate|park|feature)\s+)?(.+)$/i';
 
 		if ( ! preg_match( $pattern, $message, $matches ) ) {
 			return [
-				'error' => __( 'Invalid command format. Try "open lift name", "close trail name", "status", or "help".', 'sierra-sms-commands' ),
+				'error' => __( 'Invalid command format. Try "open lift name", "close trail name", "groom trail name", "status", or "help".', 'sierra-sms-commands' ),
 			];
 		}
 
 		$action = strtolower( $matches[1] );
 		$type_hint = ! empty( $matches[2] ) ? strtolower( $matches[2] ) : null;
 		$name = trim( $matches[3] );
+
+		// Normalize groomed to groom
+		if ( $action === 'groomed' ) {
+			$action = 'groom';
+		}
 
 		// Map type hints to post types
 		$type_map = [

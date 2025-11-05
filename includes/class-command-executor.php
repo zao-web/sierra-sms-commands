@@ -34,14 +34,19 @@ class Command_Executor {
 			];
 		}
 
+		// Set current user for audit trail
+		wp_set_current_user( $user_id );
+
+		// Handle grooming separately
+		if ( $command['action'] === 'groom' ) {
+			return self::execute_groom( $command, $provider );
+		}
+
 		// Get current status for undo
 		$old_status = get_post_meta( $command['post_id'], 'status', true );
 
 		// Determine new status
 		$new_status = ( $command['action'] === 'close' ) ? 'closed' : 'open';
-
-		// Set current user for audit trail
-		wp_set_current_user( $user_id );
 
 		// Update post meta directly
 		$updated = update_post_meta( $command['post_id'], 'status', $new_status );
@@ -71,10 +76,10 @@ class Command_Executor {
 		if ( class_exists( '\SierraResortData\Audit_Logger' ) ) {
 			\SierraResortData\Audit_Logger::log_change(
 				$command['post_id'],
+				$command['type'],
 				'status',
 				$old_status,
 				$new_status,
-				$user_id,
 				'sms:' . $provider
 			);
 		}
@@ -95,6 +100,74 @@ class Command_Executor {
 				'post_title' => $command['name'],
 				'old_status' => $old_status,
 				'new_status' => $new_status,
+			],
+		];
+	}
+
+	/**
+	 * Execute groom command
+	 *
+	 * @param array $command Parsed command
+	 * @param string $provider Provider slug
+	 * @return array Result
+	 */
+	private static function execute_groom( $command, $provider ) {
+		// Only trails can be groomed
+		if ( $command['type'] !== 'sierra_trail' ) {
+			return [
+				'success' => false,
+				'message' => __( 'Only trails can be groomed', 'sierra-sms-commands' ),
+			];
+		}
+
+		// Get current groomed status
+		$old_groomed = get_post_meta( $command['post_id'], 'groomed', true );
+		$new_groomed = 'yes';
+
+		// Update groomed status
+		$updated = update_post_meta( $command['post_id'], 'groomed', $new_groomed );
+
+		if ( $updated === false && $old_groomed === $new_groomed ) {
+			return [
+				'success' => true,
+				'message' => sprintf(
+					__( 'Trail %s is already marked as groomed', 'sierra-sms-commands' ),
+					$command['name']
+				),
+			];
+		}
+
+		if ( $updated === false ) {
+			return [
+				'success' => false,
+				'message' => __( 'Failed to update grooming status', 'sierra-sms-commands' ),
+			];
+		}
+
+		// Create audit log entry
+		if ( class_exists( '\SierraResortData\Audit_Logger' ) ) {
+			\SierraResortData\Audit_Logger::log_change(
+				$command['post_id'],
+				$command['type'],
+				'groomed',
+				$old_groomed,
+				$new_groomed,
+				'sms:' . $provider
+			);
+		}
+
+		return [
+			'success'   => true,
+			'message'   => sprintf(
+				__( 'Trail %s marked as groomed successfully', 'sierra-sms-commands' ),
+				$command['name']
+			),
+			'undo_data' => [
+				'post_id'    => $command['post_id'],
+				'post_type'  => $command['type'],
+				'post_title' => $command['name'],
+				'old_groomed' => $old_groomed,
+				'new_groomed' => $new_groomed,
 			],
 		];
 	}

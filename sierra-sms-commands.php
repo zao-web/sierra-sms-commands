@@ -57,6 +57,7 @@ class Plugin {
 	private function load_dependencies() {
 		// Providers
 		require_once SIERRA_SMS_PLUGIN_DIR . 'includes/providers/interface-sms-provider.php';
+		require_once SIERRA_SMS_PLUGIN_DIR . 'includes/providers/class-mobiniti-provider.php';
 		require_once SIERRA_SMS_PLUGIN_DIR . 'includes/providers/class-telnyx-provider.php';
 		require_once SIERRA_SMS_PLUGIN_DIR . 'includes/providers/class-textbelt-provider.php';
 		require_once SIERRA_SMS_PLUGIN_DIR . 'includes/providers/class-twilio-provider.php';
