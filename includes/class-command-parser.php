@@ -52,12 +52,12 @@ class Command_Parser {
 		}
 
 		// Parse action + type + name
-		// Examples: "open lift grandview", "close broadway", "open gate 5", "groom broadway"
+		// Examples: "open lift grandview", "close broadway", "open gate 5", "groom broadway", "open 25"
 		$pattern = '/^(open|close|reopen|groom|groomed)\s+(?:(lift|trail|gate|park|feature)\s+)?(.+)$/i';
 
 		if ( ! preg_match( $pattern, $message, $matches ) ) {
 			return [
-				'error' => __( 'Invalid command format. Try "open lift name", "close trail name", "groom trail name", "status", or "help".', 'sierra-sms-commands' ),
+				'error' => __( 'Invalid command format. Try "open lift name", "close trail name", "groom trail name", "open 25", "status", or "help".', 'sierra-sms-commands' ),
 			];
 		}
 
@@ -134,6 +134,32 @@ class Command_Parser {
 
 		// Normalize spelled-out numbers to digits
 		$search_term = self::normalize_numbers( $search_term );
+
+		// Check if search term is numeric - if so, search by grooming_number
+		if ( is_numeric( $search_term ) ) {
+			$grooming_number = intval( $search_term );
+			$posts = get_posts( [
+				'post_type'      => $post_types,
+				'posts_per_page' => -1,
+				'post_status'    => 'publish',
+				'meta_query'     => [
+					[
+						'key'     => 'grooming_number',
+						'value'   => $grooming_number,
+						'compare' => '=',
+						'type'    => 'NUMERIC',
+					],
+				],
+			] );
+
+			if ( ! empty( $posts ) ) {
+				return $posts;
+			}
+
+			// If not found by grooming number, return empty (don't fall through to name search)
+			// This prevents confusion where "25" might match a trail name containing "25"
+			return [];
+		}
 
 		// Exact match first
 		$posts = get_posts( [
@@ -309,13 +335,15 @@ class Command_Parser {
 			"SMS Commands:\n\n" .
 			"• open [type] [name] - Open a lift/trail/gate\n" .
 			"• close [type] [name] - Close a lift/trail/gate\n" .
+			"• open [number] - Open by grooming report number\n" .
 			"• status - Get current status\n" .
 			"• undo - Reverse last command\n" .
 			"• help - Show this message\n\n" .
 			"Examples:\n" .
 			"• open lift grandview\n" .
 			"• close broadway\n" .
-			"• open gate 5",
+			"• open 25\n" .
+			"• close 59",
 			'sierra-sms-commands'
 		);
 	}
